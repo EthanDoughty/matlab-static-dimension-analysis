@@ -60,6 +60,25 @@ def pretty_expr(expr):
         return f"(-{pretty_expr(expr[2])})"
     return tag
 
+def shapes_definitely_incompatible(old: Shape, new: Shape) -> bool:
+    # If either is unknown, don't claim incompatibility
+    if old.is_unknown() or new.is_unknown():
+        return False
+
+    # Scalar vs matrix is definitely incompatible for reassignment
+    if old.is_scalar() and new.is_matrix():
+        return True
+    if old.is_matrix() and new.is_scalar():
+        return True
+
+    # Matrix vs matrix: check any provable dimension conflicts
+    if old.is_matrix() and new.is_matrix():
+        if dims_definitely_conflict(old.rows, new.rows):
+            return True
+        if dims_definitely_conflict(old.cols, new.cols):
+            return True
+
+    return False
 
 # Expression analysis
 def eval_expr(
@@ -265,10 +284,20 @@ def analyze_stmt(
     tag = stmt[0]
 
     if tag == "assign":
+        assign_line = stmt[1]
         name = stmt[2]
         expr = stmt[3]
-        shape = eval_expr(expr, env, warnings)
-        env.set(name, shape)
+
+        new_shape = eval_expr(expr, env, warnings)
+        old_shape = env.get(name)
+
+        if name in env.bindings and shapes_definitely_incompatible(old_shape, new_shape):
+            warnings.append(
+                f"Line {assign_line}: Variable '{name}' reassigned with incompatible shape "
+                f"{new_shape} (previously {old_shape})"
+            )
+
+        env.set(name, new_shape)
         return env
 
     if tag == "expr":
@@ -286,7 +315,7 @@ def analyze_stmt(
         return env
 
     if tag == "while":
-        
+
         cond = stmt[1]
         body = stmt[2]
 
