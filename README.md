@@ -18,6 +18,7 @@ The analyzer statically detects dimension and shape issues in the following cons
 - **Vector transpose** (`v'`)
 - **Colon-generated vectors** (`1:n`)
 - **MATLAB-style indexing and slices** (`A(i,j)`, `A(i,:)`, `A(:,j)`, `A(:,:)`)
+- **Range indexing** (`A(2:5,:)`, `A(:,2:5)`)
 - **Matrix–scalar comparisons** (`A == 0`)
 - **Logical operators on non-scalars** (`&&`, `||`)
 - **Incompatible variable reassignments**
@@ -77,10 +78,10 @@ Each test file:
 | 9    | Indexing semantics 
 | 10   | Control-flow joins                  
 | 11-14| Matrix literals             
-| 15    | Symbolic Concatenation         
-| 16   | Row Slice Indexing
-| 17   | Column and Full Slice Indexing
-| 18   | Invalid indexing on scalars
+| 15   | Symbolic Concatenation         
+| 16-18| Indexing Slices and Invalid Scalar Indexing
+| 19-20| Range Indexing Slices
+| 21   | Invalid non-scalar index argument
 
 
 For more information on the specifics of each of the test cases, see the tests/testN.m files. MATLAB comments are provided to describe intended behavior for each test case, and the reasoning for why the assertions pass.

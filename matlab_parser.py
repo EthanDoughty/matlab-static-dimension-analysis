@@ -379,14 +379,27 @@ class MatlabParser:
         return ["matrix", line, rows]
     
     def parse_index_arg(self) -> Any:
-        """Parse a single argument inside () for indexing/calls.
-        ':' inside indexing as a dedicated node: [':', line].
+        """Parse a single argument inside () for indexing/calls
+        : -> ['colon', line]
+        a:b -> ['range', line, a, b]
         """
         tok = self.current()
+
+        # : by itself
         if tok.value == ":":
             c_tok = self.eat(":")
             return ["colon", c_tok.line]
-        return self.parse_expr()
+
+        # Parse a normal expression first
+        start = self.parse_expr()
+
+        # If immediately followed by ':' inside indexing args, treat it as a range
+        if self.current().value == ":":
+            colon_tok = self.eat(":")
+            end = self.parse_expr()
+            return ["range", colon_tok.line, start, end]
+
+        return start
 
 
     def parse_paren_args(self) -> List[Any]:

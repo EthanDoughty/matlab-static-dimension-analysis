@@ -39,6 +39,68 @@ def expr_to_dim(
     # Anything more complex: don't know
     return None
 
+def is_scalar_index_shape(s: Shape) -> bool:
+    """True if an expression is definitely scalar-shaped"""
+    return s.is_scalar()
+
+def index_arg_to_extent(
+        arg: Any,
+        env: Env,
+        warnings: List[str],
+        line: int
+    ) -> Dim:
+    """
+    Return how many rows/cols this index selects:
+      colon -> unknown extent
+      scalar expr -> 1
+      range a:b -> extent if computable, else None
+    """
+    tag = arg[0]
+
+    if tag == "colon":
+        return None
+
+    # Range inside subscripts: a:b
+    if tag in {"range", ":"}:
+        start_expr = arg[2]
+        end_expr = arg[3]
+
+        start_shape = eval_expr(start_expr, env, warnings)
+        end_shape = eval_expr(end_expr, env, warnings)
+        if start_shape.is_matrix() or end_shape.is_matrix():
+            warnings.append(
+                f"Line {line}: Range endpoints in indexing must be scalar; got "
+                f"{start_shape} and {end_shape} in {pretty_expr(arg)}. Treating result as unknown."
+            )
+            return None
+
+        # Interpret endpoints as dimensions
+        a = expr_to_dim(start_expr, env)
+        b = expr_to_dim(end_expr, env)
+
+        # If both integers, calculate exact extent (b - a) + 1
+        if isinstance(a, int) and isinstance(b, int):
+            if b < a:
+                warnings.append(
+                    f"Line {line}: Invalid range in indexing ({pretty_expr(arg)}): end < start."
+                )
+                return None
+            return (b - a) + 1
+
+        # If symbolic or unknown, keep unknown for v0.4
+        return None
+
+    # Otherwise, treat as scalar index
+    s = eval_expr(arg, env, warnings)
+    if s.is_matrix():
+        warnings.append(
+            f"Line {line}: Non-scalar index argument {pretty_expr(arg)} has shape {s}. "
+            f"Treating indexing result as unknown."
+        )
+        return None
+
+    return 1
+
 def pretty_expr(expr):
     tag = expr[0]
 
@@ -163,22 +225,41 @@ def eval_expr(
             # 2D indexing A(i,j), A(i,:), A(:,j), A(:,:)
             if len(args) == 2:
                 a1, a2 = args
-                a1_is_colon = (isinstance(a1, list) and a1[0] == "colon")
-                a2_is_colon = (isinstance(a2, list) and a2[0] == "colon")
 
-                if a1_is_colon and a2_is_colon:
-                    return Shape.matrix(m, n)
-                if a1_is_colon and not a2_is_colon:
-                    return Shape.matrix(m, 1)
-                if not a1_is_colon and a2_is_colon:
-                    return Shape.matrix(1, n)
+                # Determine the extent of each index argument
+                r_extent = index_arg_to_extent(a1, env, warnings, line)
+                c_extent = index_arg_to_extent(a2, env, warnings, line)
 
-                # A(i,j)
-                return Shape.scalar()
+                # If either extent is unknown due to invalid indexing, be strict
+                if (r_extent is None and isinstance(a1, list) and a1[0] not in {"colon", "range", ":"}) or \
+                (c_extent is None and isinstance(a2, list) and a2[0] not in {"colon", "range", ":"}):
+                    return Shape.unknown()
 
-            # Anything else (A(i,j,k)) unsupported
-            return Shape.unknown()
+                # Resolve ':' meaning "all rows/cols"
+                if isinstance(a1, list) and a1[0] == "colon":
+                    r_extent = m
+                if isinstance(a2, list) and a2[0] == "colon":
+                    c_extent = n
 
+                # Range with unknown extent
+                if isinstance(a1, list) and a1[0] in {"range", ":"} and r_extent is None:
+                    r_extent = None
+                if isinstance(a2, list) and a2[0] in {"range", ":"} and c_extent is None:
+                    c_extent = None
+
+                # If both are scalar selections
+                if r_extent == 1 and c_extent == 1:
+                    return Shape.scalar()
+
+                return Shape.matrix(r_extent, c_extent)
+            
+            if len(args) > 2:
+                warnings.append(
+                    f"Line {line}: Too many indices for 2D matrix in {pretty_expr(expr)}. "
+                    f"Treating result as unknown."
+                )
+                return Shape.unknown()
+            
         return Shape.unknown()
     
     if tag == "neg":
